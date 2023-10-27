@@ -224,7 +224,7 @@ abstract contract ContentManager is BasePlatform {
 
             totalRequiredUdao += (totalCut[i] + instrShare[i]);
         }
-
+        //deneme
         /// @dev The BUYER should have enough UDAO to pay for the cart
         require(
             udao.balanceOf(msg.sender) >= totalRequiredUdao,
