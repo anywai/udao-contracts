@@ -124,6 +124,7 @@ abstract contract BasePlatform is Pausable {
         address voucherVerifierAddress
     ) {
         roleManager = IRoleManager(roleManagerAddress);
+        foundationWallet = msg.sender;
         udao = IERC20(udaoAddress);
         udaoc = IUDAOC(udaocAddress);
         governanceTreasury = IGovernanceTreasury(governanceTreasuryAddress);
@@ -149,8 +150,8 @@ abstract contract BasePlatform is Pausable {
     /// @param _newAddress new address of the contract
     function setFoundationAddress(address _newAddress) external {
         require(
-            hasRole(BACKEND_ROLE, msg.sender),
-            "Only backend can set contract address"
+            msg.sender == foundationWallet,
+            "Only foundation can set foundation wallet address"
         );
         foundationWallet = _newAddress;
         emit FoundationWalletUpdated(_newAddress);
@@ -164,11 +165,13 @@ abstract contract BasePlatform is Pausable {
         address governanceTreasuryAddress,
         address voucherVerifierAddress
     ) external {
-        require(
-            (hasRole(BACKEND_ROLE, msg.sender) ||
-                hasRole(CONTRACT_MANAGER, msg.sender)),
-            "Only backend and contract manager can update addresses"
-        );
+        if (msg.sender != foundationWallet) {
+            require(
+                (hasRole(BACKEND_ROLE, msg.sender) ||
+                    hasRole(CONTRACT_MANAGER, msg.sender)),
+                "Only backend and contract manager can update addresses"
+            );
+        }
         udao = IERC20(udaoAddress);
         udaoc = IUDAOC(udaocAddress);
         roleManager = IRoleManager(roleManagerAddress);

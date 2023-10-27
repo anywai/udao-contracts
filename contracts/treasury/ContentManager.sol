@@ -447,6 +447,10 @@ abstract contract ContentManager is BasePlatform {
         emit ContentBought(_cartSaleID, contentSaleID.current() - 1);
     }
 
+    /// @notice Checks if the content is not owned and buyable returns the price to pay.abi
+    /// @param tokenIds An array of token IDs representing the contents in the cart.
+    /// @param purchasedParts An array of arrays representing the content parts to be purchased.
+    /// @param contentReceiver An array of addresses of the content receivers.
     function ifNotOwnedReturnPrice(
         uint256[] calldata tokenIds,
         uint256[][] calldata purchasedParts,
@@ -471,6 +475,10 @@ abstract contract ContentManager is BasePlatform {
         return totalPrice;
     }
 
+    /// @notice Checks if the content is not owned and buyable returns the price to pay and the receiver
+    /// @param _tokenId The token ID of the content.
+    /// @param _purchasedParts An array representing the parts of the content purchased.
+    /// @param _contentReceiver If there's a gift receiver, content receiver is gift receiver otherwise msg.sender.
     function _ifNotOwnedReturnPriceAndReceiver(
         uint256 _tokenId,
         uint256[] calldata _purchasedParts,
@@ -520,89 +528,6 @@ abstract contract ContentManager is BasePlatform {
         }
         return (_priceToPay, _contentReceiver);
     }
-
-    /*
-    /// @notice Checks does the receiver already own the content or content part
-    /// @param tokenId The token ID of the content.
-    /// @param purchasedParts An array representing the parts of the content purchased.
-    /// @param contentReceiver The address of the content receiver.
-    function _doReceiverHaveContentOrPart(
-        uint256 tokenId,
-        uint256[] calldata purchasedParts,
-        address contentReceiver
-    ) internal view returns (bool) {
-        for (uint256 j; j < purchasedParts.length; j++) {
-            uint256 part = purchasedParts[j];
-            if (isPartBought[contentReceiver][tokenId][part] == true) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// @notice Calculates price to pay for a content purchase
-    /// @param _tokenId The token ID of the content.
-    /// @param _fullContentPurchase A boolean indicating whether it's a full content purchase.
-    /// @param _purchasedParts An array representing the parts of the content purchased.
-    function calculatePriceToPay(
-        uint256 _tokenId,
-        bool _fullContentPurchase,
-        uint256[] calldata _purchasedParts,
-        address contentReceiver
-    ) public view returns (uint256) {
-        uint256 _priceToPay;
-        uint256 _pricePerPart;
-
-        /// @dev Get the total payment amount first
-        if (
-            _fullContentPurchase == true &&
-            ownedParts[contentReceiver][_tokenId].length == 0
-        ) {
-            _priceToPay = udaoc.getContentPrice(_tokenId);
-        } else {
-            require(
-                _purchasedParts[0] != 0,
-                "Purchased parts says 0, but fullContentPurchase is false!"
-            );
-            for (uint256 j; j < _purchasedParts.length; j++) {
-                require(
-                    _purchasedParts[j] < udaoc.getPartNumberOfContent(_tokenId),
-                    "Part does not exist!"
-                );
-                _pricePerPart = udaoc.getContentPartPrice(
-                    _tokenId,
-                    _purchasedParts[j]
-                );
-                _priceToPay += _pricePerPart;
-            }
-        }
-        return _priceToPay;
-    }
-
-    /// @notice Calculates total amount to pay for a cart purchase
-    /// @param tokenIds An array of token IDs representing the contents in the cart.
-    /// @param fullContentPurchases An array indicating whether each purchase is for full content.
-    /// @param purchasedParts An array of arrays representing the content parts to be purchased.
-    function calculatePriceToPayInTotal(
-        uint256[] calldata tokenIds,
-        bool[] calldata fullContentPurchases,
-        uint256[][] calldata purchasedParts
-    ) external view returns (uint256) {
-        uint256 tokenIdsLength = tokenIds.length;
-        uint256 totalPriceToPayUdao;
-        for (uint256 i; i < tokenIdsLength; i++) {
-            // Calculate purchased parts (or full Content) total list price.
-            totalPriceToPayUdao += calculatePriceToPay(
-                tokenIds[i],
-                fullContentPurchases[i],
-                purchasedParts[i],
-                msg.sender
-            );
-        }
-        return (totalPriceToPayUdao);
-    }
-    */
 
     /// @notice Returns the parts owned by buyer if buyer has bought any parts in the past
     /// @param _buyer The address of the buyer.
