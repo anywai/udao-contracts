@@ -2,34 +2,18 @@
 
 ## UDAOCertificate
 
-### SIGNING_DOMAIN
+### AddressesUpdated
 
 ```solidity
-string SIGNING_DOMAIN
+event AddressesUpdated(address roleManagerAddress)
 ```
 
-### SIGNATURE_VERSION
-
-```solidity
-string SIGNATURE_VERSION
-```
-
-### _tokenIdCounter
-
-```solidity
-struct Counters.Counter _tokenIdCounter
-```
-
-### roleManager
-
-```solidity
-contract IRoleManager roleManager
-```
+This event is triggered if the contract manager updates the addresses.
 
 ### constructor
 
 ```solidity
-constructor(address rmAddress) public
+constructor(address roleManagerAddress) public
 ```
 
 ### CertificateVoucher
@@ -44,6 +28,20 @@ struct CertificateVoucher {
   bytes signature;
 }
 ```
+
+### updateAddresses
+
+```solidity
+function updateAddresses(address roleManagerAddress) external
+```
+
+Get the updated addresses from contract manager
+
+#### Parameters
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| roleManagerAddress | address | The address of the role manager contract |
 
 ### redeem
 
@@ -106,7 +104,9 @@ _Will revert if the signature is invalid. Does not verify that the signer is aut
 function _beforeTokenTransfer(address from, address to, uint256 tokenId) internal virtual
 ```
 
-Checks if token transfer is allowed. Reverts if not allowed.
+Checks if token transfer is allowed.
+
+_Reverts if new receiver is not KYCed or msg.sender is not Backend._
 
 #### Parameters
 
@@ -122,7 +122,9 @@ Checks if token transfer is allowed. Reverts if not allowed.
 function emergencyTransfer(address from, address to, uint256 tokenId) external
 ```
 
-transfer token in emergency
+transfer token in emergency if owner approved the backend
+
+_Reverts if msg sender is not Backend or if to address is not KYCed or banned_
 
 #### Parameters
 

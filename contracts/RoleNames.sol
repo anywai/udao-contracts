@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-/// @title UDAO smart contract's role definitions.
+/// @title UDAO smart contract's role name definitions.
 pragma solidity ^0.8.4;
 
 abstract contract RoleNames {
@@ -20,6 +20,7 @@ abstract contract RoleNames {
     bytes32 public constant CONTRACT_MANAGER = keccak256("CONTRACT_MANAGER");
     bytes32 public constant SALE_CONTROLLER = keccak256("SALE_CONTROLLER");
     bytes32 public constant VOUCHER_VERIFIER = keccak256("VOUCHER_VERIFIER");
+    bytes32 public constant CONTENT_PUBLISHER = keccak256("CONTENT_PUBLISHER");
 
     /// Role group for administrator roles
     bytes32[] administrator_roles;
@@ -30,22 +31,3 @@ abstract contract RoleNames {
         administrator_roles.push(BACKEND_ROLE);
     }
 }
-
-//kyc list id
-//Supervision assignDispute =1 assignValidation=4,
-//UdaoStaker applyForValidator=5, applyForJuror=6, applyForCorporate=7, stakeForGovernance=8, registerJobListing=9,
-//UdaoCert redeem=10,_beforeTokenTransfer=11,emergencyTransfer=12
-//UDAOC createContent=13, modifyContent=14, addNewPart=15, setCoachingPriceAndCurrency=16, getPartNumberOfContent=17, _beforeTokenTransfer=18, _beforeTokenTransfer=19
-
-///ban LIST ID
-//Supervision assignDispute=1, createValidation=2, objectToLatestValidation=3, assignValidation=4
-//uDAOSTAKER applyForValidator=5, applyForJuror=6, getApproved=7, stakeForGovernance=8, registerJobListing=9
-//MYCONTENTMANAGER buyContentWithDiscount=20, buyCoaching=21
-//UDAOCERT
-//UDAOC createContent=13, modifyContent=14, addNewPart=15, enableCoaching=16
-//CONTENTMANAGER
-
-//1) UDAO.sol
-//2) RoleNames.sol (Abstract)
-//3) RoleManager.sol
-//

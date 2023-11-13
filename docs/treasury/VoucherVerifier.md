@@ -2,35 +2,19 @@
 
 ## VoucherVerifier
 
-### SIGNING_DOMAIN
-
-```solidity
-string SIGNING_DOMAIN
-```
-
-### SIGNATURE_VERSION
-
-```solidity
-string SIGNATURE_VERSION
-```
-
-### roleManager
-
-```solidity
-contract IRoleManager roleManager
-```
-
-### contractManager
-
-```solidity
-contract ContractManager contractManager
-```
-
 ### constructor
 
 ```solidity
-constructor(address contractManagerAddress, address rmAddress) public
+constructor(address roleManagerAddress) public
 ```
+
+### AddressesUpdated
+
+```solidity
+event AddressesUpdated(address roleManagerAddress)
+```
+
+This event is triggered if the contract manager updates the addresses.
 
 ### ContentDiscountVoucher
 
@@ -54,6 +38,7 @@ struct RefundVoucher {
   uint256 saleID;
   address instructor;
   uint256[] finalParts;
+  uint256[] finalContents;
   uint256 validUntil;
   bytes signature;
 }
@@ -70,6 +55,20 @@ struct CoachingVoucher {
   bytes signature;
 }
 ```
+
+### updateAddresses
+
+```solidity
+function updateAddresses(address roleManagerAddress) external
+```
+
+Get the updated addresses from contract manager
+
+#### Parameters
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| roleManagerAddress | address | The address of the role manager contract |
 
 ### _hashDiscountVoucher
 
@@ -127,7 +126,7 @@ _Will revert if the signature is invalid._
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| voucher | struct VoucherVerifier.ContentDiscountVoucher | A ContentDiscountVoucher describing a content access rights. |
+| voucher | struct VoucherVerifier.ContentDiscountVoucher | A ContentDiscountVoucher describing a content purchase. |
 
 ### verifyRefundVoucher
 
@@ -135,7 +134,7 @@ _Will revert if the signature is invalid._
 function verifyRefundVoucher(struct VoucherVerifier.RefundVoucher voucher) external view
 ```
 
-Verifies the signature for a given ContentDiscountVoucher, returning the address of the signer.
+Verifies the signature for a given RefundVoucher, returning the address of the signer.
 
 _Will revert if the signature is invalid._
 
@@ -143,7 +142,7 @@ _Will revert if the signature is invalid._
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| voucher | struct VoucherVerifier.RefundVoucher | A ContentDiscountVoucher describing a content access rights. |
+| voucher | struct VoucherVerifier.RefundVoucher | A RefundVoucher describing a refund. |
 
 ### verifyCoachingVoucher
 
@@ -159,7 +158,7 @@ _Will revert if the signature is invalid._
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| voucher | struct VoucherVerifier.CoachingVoucher | A CoachingVoucher describing a content access rights. |
+| voucher | struct VoucherVerifier.CoachingVoucher | A CoachingVoucher describing a coaching purchase. |
 
 ### getChainID
 

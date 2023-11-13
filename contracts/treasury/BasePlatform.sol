@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.4;
-//Comment for test
-/// @title BasePlatform - PlatformTreasury
+/// @title BasePlatform of PlatformTreasury
 /// @author anywaiTR: Bugrahan Duran, Batuhan Darcin
-/// @notice Contains key definitions for a platform treasury.
-/// @dev This contract is inherited by ContentManager contract.
+/// @notice Contains key definitions for a platform treasury. This is an abstract contract and serves as the base contract for the UDAO Platform treasury.
+/// @dev It defines and allocates role dependent balances-pools-timers, and purchase cuts.
+pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -15,6 +14,7 @@ import "../interfaces/IRoleManager.sol";
 import "../interfaces/IVoucherVerifier.sol";
 
 abstract contract BasePlatform is Pausable {
+    /// @dev Role definitions are here to reduce the size of the contract.
     bytes32 public constant BACKEND_ROLE = keccak256("BACKEND_ROLE");
     bytes32 public constant FOUNDATION_ROLE = keccak256("FOUNDATION_ROLE");
     bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");
@@ -32,11 +32,11 @@ abstract contract BasePlatform is Pausable {
     IGovernanceTreasury governanceTreasury;
 
     /// @notice Address of foundation wallet is used for sending funds to foundation
-    address foundationWallet;
+    address public foundationWallet;
 
     /// @notice during refund windows all payments locked on contract and users can request refund
-    /// @dev instLockedBalance and coaching/contentCutLockedPool arrays's size defines the maximum setable refund window
-    uint256 public refundWindow = 14;
+    /// @dev it initiated as 20 days and locked balance/pool array's size (61) defines the maximum setable refund window.
+    uint256 public refundWindow = 20; 
 
     /// @notice instructor address => instructor's balance
     mapping(address => uint) public instBalance;
@@ -69,9 +69,9 @@ abstract contract BasePlatform is Pausable {
     /// @notice instructor address => instructor's refunded balance to users
     mapping(address => uint) public instRefundedBalance;
     /// @notice content cut pool's refunded cuts to users
-    uint256 contentCutRefundedBalance;
+    uint256 public contentCutRefundedBalance;
     /// @notice coaching cut pool's refunded cuts to users
-    uint256 coachingCutRefundedBalance;
+    uint256 public coachingCutRefundedBalance;
 
     /// @notice instructor address => instructor's previous refund window for last sale
     mapping(address => uint) public prevInstRefundWindow;
@@ -103,17 +103,19 @@ abstract contract BasePlatform is Pausable {
     uint public coachValidCut = 0;
 
     /// @notice allocated total cut for foundation, governance, juror and validator from content sales
-    uint256 contentTotalCut =
+    uint256 public contentTotalCut =
         contentFoundCut + contentGoverCut + contentJurorCut + contentValidCut;
     /// @notice allocated total cut for foundation, governance, juror and validator from coaching sales
-    uint256 coachTotalCut =
+    uint256 public coachTotalCut =
         coachFoundCut + coachGoverCut + coachJurorCut + coachValidCut;
 
     /// @notice is governance part of platform released
-    bool isGovernanceTreasuryOnline = false;
+    bool public isGovernanceTreasuryOnline = false;
 
     /// @notice constructor of BasePlatform
     /// @param roleManagerAddress is address of RoleManager contract
+    /// @param udaoAddress is address of UDAO token contract
+    /// @param udaocAddress is address of UDAOC token contract
     /// @param governanceTreasuryAddress is address of GovernanceTreasury contract
     /// @param voucherVerifierAddress is address of VoucherVerifier contract
     constructor(
@@ -123,8 +125,8 @@ abstract contract BasePlatform is Pausable {
         address governanceTreasuryAddress,
         address voucherVerifierAddress
     ) {
-        roleManager = IRoleManager(roleManagerAddress);
         foundationWallet = msg.sender;
+        roleManager = IRoleManager(roleManagerAddress);
         udao = IERC20(udaoAddress);
         udaoc = IUDAOC(udaocAddress);
         governanceTreasury = IGovernanceTreasury(governanceTreasuryAddress);
@@ -144,20 +146,46 @@ abstract contract BasePlatform is Pausable {
     );
 
     /// @notice This event is triggered if a cut is updated.
-    event PlatformCutsUpdated();
+    /// @param _contentFoundCut is the new cut for foundation
+    /// @param _contentGoverCut is the new cut for governance
+    /// @param _contentJurorCut is the new cut for juror pool
+    /// @param _contentValidCut is the new cut for validator pool
+    /// @param _contentTotalCut is the new total cut for foundation, governance, juror and validator
+    /// @param _coachFoundCut is the new cut for foundation
+    /// @param _coachGoverCut is the new cut for governance
+    /// @param _coachJurorCut is the new cut for juror pool
+    /// @param _coachValidCut is the new cut for validator pool
+    /// @param _coachTotalCut is the new total cut for foundation, governance, juror and validator
+    event PlatformCutsUpdated(
+        uint _contentFoundCut,
+        uint _contentGoverCut,
+        uint _contentJurorCut,
+        uint _contentValidCut,
+        uint _contentTotalCut,
+        uint _coachFoundCut,
+        uint _coachGoverCut,
+        uint _coachJurorCut,
+        uint _coachValidCut,
+        uint _coachTotalCut
+    );
 
     /// @notice sets foundation wallet addresses
     /// @param _newAddress new address of the contract
     function setFoundationAddress(address _newAddress) external {
         require(
-            msg.sender == foundationWallet,
-            "Only foundation can set foundation wallet address"
+            hasRole(BACKEND_ROLE, msg.sender),
+            "Only backend can set contract address"
         );
         foundationWallet = _newAddress;
         emit FoundationWalletUpdated(_newAddress);
     }
 
     /// @notice Get the updated addresses from contract manager
+    /// @param udaoAddress The address of the UDAO token contract
+    /// @param udaocAddress The address of the UDAOC token contract
+    /// @param roleManagerAddress The address of the role manager contract
+    /// @param governanceTreasuryAddress The address of the governance treasury contract
+    /// @param voucherVerifierAddress The address of the voucher verifier contract
     function updateAddresses(
         address udaoAddress,
         address udaocAddress,
@@ -187,6 +215,9 @@ abstract contract BasePlatform is Pausable {
         );
     }
 
+    /// @notice Checks if the user has the given role
+    /// @param _role is the role to be checked
+    /// @param _account is the address to be checked
     function hasRole(
         bytes32 _role,
         address _account
@@ -194,6 +225,9 @@ abstract contract BasePlatform is Pausable {
         return (roleManager.hasRole(_role, _account));
     }
 
+    /// @notice Checks if the user is banned
+    /// @param _userAddress is the address to be checked
+    /// @param _functionID is the function id to be checked
     function isNotBanned(
         address _userAddress,
         uint _functionID
@@ -201,6 +235,9 @@ abstract contract BasePlatform is Pausable {
         return !roleManager.isBanned(_userAddress, _functionID);
     }
 
+    /// @notice Checks if the user is KYCed
+    /// @param _userAddress is the address to be checked
+    /// @param _functionID is the function id to be checked
     function isKYCed(
         address _userAddress,
         uint _functionID
@@ -208,6 +245,9 @@ abstract contract BasePlatform is Pausable {
         return roleManager.isKYCed(_userAddress, _functionID);
     }
 
+    /// @notice Allows the backend to activate the governance treasury
+    /// @param _boolean is the boolean value to be set
+    /// @dev Tokens flows to governance treasury after if this function is called with true
     function activateGovernanceTreasury(bool _boolean) external {
         require(
             hasRole(BACKEND_ROLE, msg.sender),
@@ -291,7 +331,18 @@ abstract contract BasePlatform is Pausable {
 
         coachTotalCut = newTotal;
 
-        emit PlatformCutsUpdated();
+        emit PlatformCutsUpdated(
+            contentFoundCut,
+            contentGoverCut,
+            contentJurorCut,
+            contentValidCut,
+            contentTotalCut,
+            coachFoundCut,
+            coachGoverCut,
+            coachJurorCut,
+            coachValidCut,
+            coachTotalCut
+        );
     }
 
     /// @notice sets the cut for foundation/governance/juror/validator for a content sale
@@ -324,6 +375,17 @@ abstract contract BasePlatform is Pausable {
 
         contentTotalCut = newTotal;
 
-        emit PlatformCutsUpdated();
+        emit PlatformCutsUpdated(
+            contentFoundCut,
+            contentGoverCut,
+            contentJurorCut,
+            contentValidCut,
+            contentTotalCut,
+            coachFoundCut,
+            coachGoverCut,
+            coachJurorCut,
+            coachValidCut,
+            coachTotalCut
+        );
     }
 }

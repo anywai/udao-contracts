@@ -2,53 +2,23 @@
 
 ## UDAOContent
 
-### contractManager
+### supervision
 
 ```solidity
-contract ContractManager contractManager
-```
-
-### _tokenIds
-
-```solidity
-struct Counters.Counter _tokenIds
-```
-
-### SIGNING_DOMAIN
-
-```solidity
-string SIGNING_DOMAIN
-```
-
-### SIGNATURE_VERSION
-
-```solidity
-string SIGNATURE_VERSION
-```
-
-### ISupVis
-
-```solidity
-contract ISupervision ISupVis
-```
-
-### roleManager
-
-```solidity
-contract IRoleManager roleManager
+contract ISupervision supervision
 ```
 
 ### constructor
 
 ```solidity
-constructor(address rmAddress) public
+constructor(address roleManagerAddress) public
 ```
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| rmAddress | address | The address of the deployed role manager |
+| roleManagerAddress | address | The address of the deployed role manager |
 
 ### isSellable
 
@@ -56,22 +26,28 @@ constructor(address rmAddress) public
 mapping(uint256 => bool) isSellable
 ```
 
-### contentPrice
+_tokenId => true/false (is sellable)_
+
+### contentParts
 
 ```solidity
-mapping(uint256 => mapping(uint256 => uint256)) contentPrice
+mapping(uint256 => uint256[]) contentParts
 ```
 
-### partNumberOfContent
+_tokenId => partIds_
+
+### NewContentCreated
 
 ```solidity
-mapping(uint256 => uint256) partNumberOfContent
+event NewContentCreated(uint256 tokenId, address owner)
 ```
 
-### newPartAdded
+This event is triggered when a new content is created
+
+### ContentModified
 
 ```solidity
-event newPartAdded(uint256 tokenId, uint256 newPartId, uint256 newPartPrice)
+event ContentModified(uint256 tokenId, address owner, uint256 newPartNumber)
 ```
 
 This event is triggered when a new part is added to a content
@@ -79,7 +55,7 @@ This event is triggered when a new part is added to a content
 ### AddressesUpdated
 
 ```solidity
-event AddressesUpdated(address isupvis)
+event AddressesUpdated(address RoleManager, address Supervision)
 ```
 
 This event is triggered if the contract manager updates the addresses.
@@ -97,7 +73,7 @@ Triggered when KYC requirement for content creating is changed
 ```solidity
 struct RedeemVoucher {
   uint256 validUntil;
-  uint256[] _contentPrice;
+  uint256[] _parts;
   uint256 tokenId;
   string _uri;
   address _redeemer;
@@ -122,29 +98,20 @@ Allows sale controller to set sellable status of a content
 | _tokenId | uint256 | id of the content |
 | _isSellable | bool | is content sellable |
 
-### setContractManager
+### updateAddresses
 
 ```solidity
-function setContractManager(address _contractManager) external
+function updateAddresses(address roleManagerAddress, address supervisionAddress) external
 ```
 
-Allows backend to set the contract manager address
-
-_This function is needed because the contract manager address is not known at compile time._
+Get the updated addresses from contract manager
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| _contractManager | address | The address of the contract manager |
-
-### updateAddresses
-
-```solidity
-function updateAddresses() external
-```
-
-Get the updated addresses from contract manager
+| roleManagerAddress | address | The address of the role manager contract |
+| supervisionAddress | address | The address of the supervision contract |
 
 ### createContent
 
@@ -180,7 +147,7 @@ Checks if a string is empty
 function modifyContent(struct UDAOContent.RedeemVoucher voucher) external
 ```
 
-Redeems a RedeemVoucher for an actual NFT, modifying existing content in the process.
+Allows modification of a content by redeeming a voucher.
 
 #### Parameters
 
@@ -188,83 +155,19 @@ Redeems a RedeemVoucher for an actual NFT, modifying existing content in the pro
 | ---- | ---- | ----------- |
 | voucher | struct UDAOContent.RedeemVoucher | A RedeemVoucher describing an unminted NFT. |
 
-### getContentPriceAndCurrency
+### getContentParts
 
 ```solidity
-function getContentPriceAndCurrency(uint256 tokenId, uint256 partId) external view returns (uint256)
+function getContentParts(uint256 tokenId) external view returns (uint256[])
 ```
 
-returns the price of a specific content
+returns the parts array of a specific content
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | tokenId | uint256 | the content ID of the token |
-| partId | uint256 | the part ID of the token (microlearning), full content price if 0 |
-
-### setFullPriceContent
-
-```solidity
-function setFullPriceContent(uint256 tokenId, uint256 _contentPrice) external
-```
-
-allows content owners to set full content price
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| tokenId | uint256 | the content ID of the token |
-| _contentPrice | uint256 | the price to set |
-
-### setPartialContent
-
-```solidity
-function setPartialContent(uint256 tokenId, uint256 partId, uint256 _contentPrice) external
-```
-
-allows content owners to set price for a part in a content (microlearning)
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| tokenId | uint256 | the content ID of the token |
-| partId | uint256 |  |
-| _contentPrice | uint256 | the price to set |
-
-### setBatchPartialContent
-
-```solidity
-function setBatchPartialContent(uint256 tokenId, uint256[] partId, uint256[] _contentPrice) external
-```
-
-allows content owners to set price for multiple parts in a content (microlearning)
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| tokenId | uint256 | the content ID of the token |
-| partId | uint256[] |  |
-| _contentPrice | uint256[] | the price to set |
-
-### setBatchFullContent
-
-```solidity
-function setBatchFullContent(uint256 tokenId, uint256[] partId, uint256[] _contentPrice) external
-```
-
-allows content owners to set price for full content and multiple parts in a content
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| tokenId | uint256 | the content ID of the token |
-| partId | uint256[] |  |
-| _contentPrice | uint256[] | the price to set, first price is for full content price |
 
 ### _getPartNumberOfContent
 
@@ -288,32 +191,43 @@ Returns the part numbers that a content has
 function _burn(uint256 tokenId) internal
 ```
 
+Burns a content which is not allowed
+
+#### Parameters
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tokenId | uint256 | The id of the token to burn |
+
 ### _beforeTokenTransfer
 
 ```solidity
 function _beforeTokenTransfer(address from, address to, uint256 tokenId) internal virtual
 ```
 
-_Hook that is called before any token transfer. This includes minting
-and burning.
+Allows transfer of a content with KYC and ban checks
 
-Calling conditions:
+#### Parameters
 
-- When `from` and `to` are both non-zero, ``from``'s `tokenId` will be
-transferred to `to`.
-- When `from` is zero, `tokenId` will be minted for `to`.
-- When `to` is zero, ``from``'s `tokenId` will be burned.
-- `from` and `to` are never both zero.
-
-To learn more about hooks, head to xref:ROOT:extending-contracts.adoc#using-hooks[Using Hooks]._
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| from | address | The current token owner |
+| to | address | Token to send to |
+| tokenId | uint256 | The id of the token to transfer |
 
 ### existsBatch
 
 ```solidity
-function existsBatch(uint256[] tokenId) external view returns (bool[])
+function existsBatch(uint256[] tokenIds) external view returns (bool[])
 ```
 
-Allows off-chain check if a token(content) exists
+Allows off-chain check if batch of tokens(content) exists
+
+#### Parameters
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tokenIds | uint256[] | Array of token IDs |
 
 ### exists
 
@@ -323,11 +237,11 @@ function exists(uint256 tokenId) external view returns (bool)
 
 Allows off-chain check if a token(content) exists
 
-### tokenURI
+#### Parameters
 
-```solidity
-function tokenURI(uint256 tokenId) public view returns (string)
-```
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| tokenId | uint256 | The ID of a token |
 
 ### _hash
 
@@ -370,21 +284,31 @@ _Will revert if the signature is invalid. Does not verify that the signer is aut
 | ---- | ---- | ----------- |
 | voucher | struct UDAOContent.RedeemVoucher | A RedeemVoucher describing an unminted NFT. |
 
-### supportsInterface
-
-```solidity
-function supportsInterface(bytes4 interfaceId) public view returns (bool)
-```
-
 ### pause
 
 ```solidity
 function pause() external
 ```
 
+Allows backend to pause the contract
+
 ### unpause
 
 ```solidity
 function unpause() external
+```
+
+Allows backend to unpause the contract
+
+### tokenURI
+
+```solidity
+function tokenURI(uint256 tokenId) public view returns (string)
+```
+
+### supportsInterface
+
+```solidity
+function supportsInterface(bytes4 interfaceId) public view returns (bool)
 ```
 

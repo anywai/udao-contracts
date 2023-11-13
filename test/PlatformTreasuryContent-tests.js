@@ -4,7 +4,6 @@ const { ethers } = hardhat;
 const chai = require("chai");
 const BN = require("bn.js");
 const { DiscountedPurchase } = require("../lib/DiscountedPurchase");
-const { LazyRole } = require("../lib/LazyRole");
 const { RefundVoucher } = require("../lib/RefundVoucher");
 const { Redeem } = require("../lib/Redeem");
 const helpers = require("@nomicfoundation/hardhat-network-helpers");
@@ -14,22 +13,106 @@ const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 // Enable and inject BN dependency
 chai.use(require("chai-bn")(BN));
 /// HELPERS---------------------------------------------------------------------
-async function makeContentPurchase(contractPlatformTreasury, contentBuyer, contractRoleManager, contractUDAO) {
+async function createContentVoucher(
+  contractUDAOContent,
+  backend,
+  contentCreator,
+  contentParts,
+  partPrices,
+  redeemType = 1,
+  validationScore = 1
+) {
+  // Get the current block timestamp
+  const block = await ethers.provider.getBlock("latest");
+  // add some minutes to it and convert it to a BigNumber
+  const futureBlock = block.timestamp + 1000;
+  // convert it to a BigNumber
+  const futureBlockBigNumber = ethers.BigNumber.from(futureBlock);
+  return await new Redeem({
+    contract: contractUDAOContent,
+    signer: backend,
+  }).createVoucher(
+    futureBlockBigNumber,
+    contentParts,
+    0,
+    "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+    contentCreator.address,
+    redeemType,
+    validationScore
+  );
+}
+async function makeContentPurchase(
+  contractPlatformTreasury,
+  contractVoucherVerifier,
+  contentBuyer,
+  contractRoleManager,
+  contractUDAO,
+  tokenIds,
+  purchasedParts,
+  pricesToPay,
+  fullContentPurchase,
+  validUntil,
+  redeemers,
+  giftReceiver
+) {
   /// Set KYC
   await contractRoleManager.setKYC(contentBuyer.address, true);
   /// Send UDAO to the buyer's wallet
   await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
+  const balanceBeforePurchase = await contractUDAO.balanceOf(contentBuyer.address);
   /// Content buyer needs to give approval to the platformtreasury
   await contractUDAO
     .connect(contentBuyer)
     .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-  const tokenIds = [0];
-  const purchasedParts = [[1]];
-  const giftReceiver = [ethers.constants.AddressZero];
-  await contractPlatformTreasury.connect(contentBuyer).buyContent(tokenIds, purchasedParts, giftReceiver);
-  const result = await contractPlatformTreasury.connect(contentBuyer).getOwnedParts(contentBuyer.address, tokenIds[0]);
-  // Result is bignumber array
-  expect(result[0]).to.equal(1);
+
+  /// Create content purchase vouchers
+  /*
+  ContentDiscountVoucher: [
+        { name: "tokenId", type: "uint256" },
+        { name: "fullContentPurchase", type: "bool" },
+        { name: "purchasedParts", type: "uint256[]" },
+        { name: "priceToPay", type: "uint256" },
+        { name: "validUntil", type: "uint256" },
+        { name: "redeemer", type: "address" },
+        { name: "giftReceiver", type: "address" },
+      ],
+  */
+  const contentPurchaseVouchers = [];
+  for (let i = 0; i < tokenIds.length; i++) {
+    const contentPurchaseVoucher = await new DiscountedPurchase({
+      contract: contractVoucherVerifier,
+      signer: backend,
+    }).createVoucher(
+      tokenIds[i],
+      fullContentPurchase[i],
+      purchasedParts[i],
+      pricesToPay[i],
+      validUntil,
+      redeemers[i],
+      giftReceiver[i]
+    );
+    // Save the voucher to the array
+    contentPurchaseVouchers.push(contentPurchaseVoucher);
+  }
+  /// Buy content
+  const purchaseTx = await contractPlatformTreasury
+    .connect(contentBuyer)
+    .buyContentWithDiscount(contentPurchaseVouchers);
+  const queueTxReceipt = await purchaseTx.wait();
+  const queueTxEvent = queueTxReceipt.events.find((e) => e.event == "ContentBought");
+  const contentSaleID = queueTxEvent.args[0];
+  // Get content struct
+  const contentStruct = await contractPlatformTreasury.contentSales(contentSaleID);
+  // Check if returned learner address is the same as the buyer address
+  for (let i = 0; i < tokenIds.length; i++) {
+    if (giftReceiver[i] == ethers.constants.AddressZero) {
+      expect(contentStruct.contentReceiver).to.equal(contentBuyer.address);
+    } else {
+      expect(contentStruct.contentReceiver).to.equal(giftReceiver[i]);
+    }
+  }
+  const balanceOfContentBuyer = await contractUDAO.balanceOf(contentBuyer.address);
+  return [balanceBeforePurchase, balanceOfContentBuyer];
 }
 /// @dev Deploy contracts and assign them
 async function reDeploy(reApplyRolesViaVoucher = true, isDexRequired = false) {
@@ -78,141 +161,7 @@ async function reDeploy(reApplyRolesViaVoucher = true, isDexRequired = false) {
   account1 = replace.account1;
   account2 = replace.account2;
   account3 = replace.account3;
-  const reApplyValidatorRoles = [validator, validator1, validator2, validator3, validator4, validator5];
-  const reApplyJurorRoles = [jurorMember, jurorMember1, jurorMember2, jurorMember3, jurorMember4];
-  const VALIDATOR_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("VALIDATOR_ROLE"));
-  const JUROR_ROLE = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("JUROR_ROLE"));
-  if (reApplyRolesViaVoucher) {
-    for (let i = 0; i < reApplyValidatorRoles.length; i++) {
-      await contractRoleManager.revokeRole(VALIDATOR_ROLE, reApplyValidatorRoles[i].address);
-    }
-    for (let i = 0; i < reApplyJurorRoles.length; i++) {
-      await contractRoleManager.revokeRole(JUROR_ROLE, reApplyJurorRoles[i].address);
-    }
-    for (let i = 0; i < reApplyValidatorRoles.length; i++) {
-      await grantValidatorRole(
-        reApplyValidatorRoles[i],
-        contractRoleManager,
-        contractUDAO,
-        contractUDAOStaker,
-        backend
-      );
-    }
-    for (let i = 0; i < reApplyJurorRoles.length; i++) {
-      await grantJurorRole(reApplyJurorRoles[i], contractRoleManager, contractUDAO, contractUDAOStaker, backend);
-    }
-  }
-}
-async function grantValidatorRole(account, contractRoleManager, contractUDAO, contractUDAOStaker, backend) {
-  await contractRoleManager.setKYC(account.address, true);
-  await contractUDAO.transfer(account.address, ethers.utils.parseEther("100.0"));
-  await contractUDAO.connect(account).approve(contractUDAOStaker.address, ethers.utils.parseEther("999999999999.0"));
-
-  // Staking
-  await contractUDAOStaker.connect(account).stakeForGovernance(ethers.utils.parseEther("10"), 30);
-  await contractUDAOStaker.connect(account).applyForValidator();
-  const lazyRole = new LazyRole({
-    contract: contractUDAOStaker,
-    signer: backend,
-  });
-  const role_voucher = await lazyRole.createVoucher(account.address, Date.now() + 999999999, 0);
-  await contractUDAOStaker.connect(account).getApproved(role_voucher);
-}
-
-async function grantJurorRole(account, contractRoleManager, contractUDAO, contractUDAOStaker, backend) {
-  await contractRoleManager.setKYC(account.address, true);
-  await contractUDAO.transfer(account.address, ethers.utils.parseEther("100.0"));
-
-  await contractUDAO.connect(account).approve(contractUDAOStaker.address, ethers.utils.parseEther("999999999999.0"));
-
-  // Staking
-
-  await contractUDAOStaker.connect(account).stakeForGovernance(ethers.utils.parseEther("10"), 30);
-  await contractUDAOStaker.connect(account).applyForJuror();
-  const lazyRole = new LazyRole({
-    contract: contractUDAOStaker,
-    signer: backend,
-  });
-  const role_voucher = await lazyRole.createVoucher(account.address, Date.now() + 999999999, 1);
-  await contractUDAOStaker.connect(account).getApproved(role_voucher);
-}
-async function runValidation(
-  contractSupervision,
-  backend,
-  validator1,
-  validator2,
-  validator3,
-  validator4,
-  validator5,
-  contentCreator,
-  tokenId = 0,
-  validationId = 1
-) {
-  await expect(contractSupervision.connect(validator1).assignValidation(validationId))
-    .to.emit(contractSupervision, "ValidationAssigned")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator1.address);
-  await expect(contractSupervision.connect(validator2).assignValidation(validationId))
-    .to.emit(contractSupervision, "ValidationAssigned")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator2.address);
-  await expect(contractSupervision.connect(validator3).assignValidation(validationId))
-    .to.emit(contractSupervision, "ValidationAssigned")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator3.address);
-  await expect(contractSupervision.connect(validator4).assignValidation(validationId))
-    .to.emit(contractSupervision, "ValidationAssigned")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator4.address);
-  await expect(contractSupervision.connect(validator5).assignValidation(validationId))
-    .to.emit(contractSupervision, "ValidationAssigned")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator5.address);
-
-  await expect(contractSupervision.connect(validator1).sendValidation(validationId, true))
-    .to.emit(contractSupervision, "ValidationResultSent")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator1.address, true);
-  await expect(contractSupervision.connect(validator2).sendValidation(validationId, true))
-    .to.emit(contractSupervision, "ValidationResultSent")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator2.address, true);
-  await expect(contractSupervision.connect(validator3).sendValidation(validationId, true))
-    .to.emit(contractSupervision, "ValidationResultSent")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator3.address, true);
-  await expect(contractSupervision.connect(validator4).sendValidation(validationId, true))
-    .to.emit(contractSupervision, "ValidationResultSent")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator4.address, true);
-  await expect(contractSupervision.connect(validator5).sendValidation(validationId, false))
-    .to.emit(contractSupervision, "ValidationResultSent")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), validator5.address, false);
-  await expect(contractSupervision.connect(contentCreator).finalizeValidation(validationId))
-    .to.emit(contractSupervision, "ValidationEnded")
-    .withArgs(ethers.BigNumber.from(tokenId), ethers.BigNumber.from(validationId), true);
-}
-
-async function createContentVoucher(
-  contractUDAOContent,
-  backend,
-  contentCreator,
-  contentPrice,
-  partPrices,
-  redeemType = 1,
-  validationScore = 1
-) {
-  // Get the current block timestamp
-  const block = await ethers.provider.getBlock("latest");
-  // add some minutes to it and convert it to a BigNumber
-  const futureBlock = block.timestamp + 1000;
-  // convert it to a BigNumber
-  const futureBlockBigNumber = ethers.BigNumber.from(futureBlock);
-
-  return await new Redeem({
-    contract: contractUDAOContent,
-    signer: backend,
-  }).createVoucher(
-    futureBlockBigNumber,
-    contentPrice,
-    partPrices,
-    0,
-    "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
-    contentCreator.address,
-    redeemType,
-    validationScore
-  );
+  contractGovernanceTreasury = replace.contractGovernanceTreasury;
 }
 
 describe("Platform Treasury Contract - Content", function () {
@@ -226,7 +175,7 @@ describe("Platform Treasury Contract - Content", function () {
           contractUDAO.address,
           contractUDAOContent.address,
           contractRoleManager.address,
-          contractUDAOGovernor.address,
+          contractGovernanceTreasury.address,
           contractVoucherVerifier.address
         )
     ).to.revertedWith("Only backend and contract manager can update addresses");
@@ -237,799 +186,830 @@ describe("Platform Treasury Contract - Content", function () {
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-    /// part prices must be determined before creating content
-    const partPricesArray = [ethers.utils.parseEther("1"), ethers.utils.parseEther("1")];
-    const contentPriceSet = ethers.utils.parseEther("2");
-    /// Create Voucher from redeem.js and use it for creating content
+    // Create content
+    const contentParts = [0, 1];
     // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      contentPriceSet,
-      partPricesArray,
+      contentParts,
       (redeemType = 1),
       (validationScore = 1)
     );
+
     // Create content with voucher
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    // Make a content purchase to gather funds for governance
-    await makeContentPurchase(contractPlatformTreasury, contentBuyer1, contractRoleManager, contractUDAO);
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // You need to use all parts of the content to buy it. Get all parts of the content
 
-    /// Get current UDAO balance of the buyer
-    const balanceBefore = await contractUDAO.balanceOf(contentBuyer1.address);
-    /// Content buyer needs to give approval to the platformtreasury
-    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer1.address);
-    /// Get current UDAO balance of the buyer
-    const balanceAfter = await contractUDAO.balanceOf(contentBuyer1.address);
+    const parts = await contractUDAOContent.getContentParts(tokenId);
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [parts];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [true];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers,
+      giftReceiver
+    );
+    const balanceBefore = balances[0];
+    const balanceAfter = balances[1];
+
+    /// @notice user address => content token Id => is full content purchase
+    //mapping(address => mapping(uint256 => bool)) public ;
+
+    /// Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer1.address, tokenId);
+    expect(result[0]).to.equal(purchasedParts[0][0]);
+    const isFullyPurchased = await contractPlatformTreasury.isFullyPurchased(contentBuyer1.address, tokenId);
+
+    expect(isFullyPurchased).to.equal(true);
     /// Get tokenId 0 price with calculatePriceToPay function
-    const priceToPay = await contractPlatformTreasury.calculatePriceToPay(0, true, [1]);
-
-    /// Check if the buyer's balance is decreased
-
-    const numArray = result.map((x) => x.map((y) => y.toNumber()));
-    expect(numArray).to.eql([[0, 0]]);
+    const priceToPay = pricesToPay[0];
+    /// Check if the buyer paid the correct amount
+    expect(balanceBefore.sub(balanceAfter)).to.equal(priceToPay);
   });
 
   it("Should a user able to buy parts of a content", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-    ];
-
-    /// Create Voucher from redeem.js and use it for creating content
+    // Create content
+    const contentParts = [0, 1, 2, 3, 4, 5];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[2, 3, 5]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
 
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers,
+      giftReceiver
     );
+    const balanceBefore = balances[0];
+    const balanceAfter = balances[1];
 
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    await contractPlatformTreasury.connect(contentBuyer).buyContent([0], [false], [[1, 2, 3]], [contentBuyer.address]);
-    const result = await contractPlatformTreasury.connect(contentBuyer).getOwnedContent(contentBuyer.address);
-    const numArray = result.map((x) => x.map((y) => y.toNumber()));
-    expect(numArray).to.eql([
-      [0, 1],
-      [0, 2],
-      [0, 3],
-    ]);
+    /// Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer1.address, tokenId);
+    expect(result[0]).to.equal(purchasedParts[0][0]);
+    expect(result[1]).to.equal(purchasedParts[0][1]);
+    expect(result[2]).to.equal(purchasedParts[0][2]);
+    /// Check if the buyer paid the correct amount
+    expect(balanceBefore.sub(balanceAfter)).to.equal(pricesToPay[0]);
   });
   //İkinci
   it("Should fail to buy a content part if content part already purchased", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-    ];
-
-    /// Create Voucher from redeem.js and use it for creating content
+    // Create content
+    const contentParts = [0, 1, 2, 3, 4, 5];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
-
-    /// create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[2, 3, 5]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers,
+      giftReceiver
     );
-
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    await contractPlatformTreasury.connect(contentBuyer).buyContent([0], [false], [[2]], [contentBuyer.address]);
-
+    const balanceBefore = balances[0];
+    const balanceAfter = balances[1];
+    /// Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer1.address, tokenId);
+    expect(result[0]).to.equal(purchasedParts[0][0]);
+    expect(result[1]).to.equal(purchasedParts[0][1]);
+    expect(result[2]).to.equal(purchasedParts[0][2]);
+    /// Check if the buyer paid the correct amount
+    expect(balanceBefore.sub(balanceAfter)).to.equal(pricesToPay[0]);
+    // Try to buy the same content part again
+    const contentPurchaseVouchers = [];
+    for (let i = 0; i < tokenIds.length; i++) {
+      const contentPurchaseVoucher = await new DiscountedPurchase({
+        contract: contractVoucherVerifier,
+        signer: backend,
+      }).createVoucher(
+        tokenIds[i],
+        fullContentPurchase[i],
+        purchasedParts[i],
+        pricesToPay[i],
+        validUntil,
+        redeemers[i],
+        giftReceiver[i]
+      );
+      // Save the voucher to the array
+      contentPurchaseVouchers.push(contentPurchaseVoucher);
+    }
+    /// Buy content
     await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [false], [[2]], [contentBuyer.address])
-    ).to.revertedWith("Content part is already bought");
+      contractPlatformTreasury.connect(contentBuyer1).buyContentWithDiscount(contentPurchaseVouchers)
+    ).to.revertedWith("Part is already owned!");
   });
 
   it("Should fail to buy a content if content does not exists", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
-    await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// Content buyer needs to give approval to the platformtreasury
+    await contractRoleManager.setKYC(contentBuyer1.address, true);
+    // Give approval to the platformtreasury
     await contractUDAO
       .connect(contentBuyer)
       .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
+    // Send UDAO to the buyer's wallet
+    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
+    // Try to buy a content that does not exists
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[2, 3, 5]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const contentPurchaseVouchers = [];
+    for (let i = 0; i < tokenIds.length; i++) {
+      const contentPurchaseVoucher = await new DiscountedPurchase({
+        contract: contractVoucherVerifier,
+        signer: backend,
+      }).createVoucher(
+        tokenIds[i],
+        fullContentPurchase[i],
+        purchasedParts[i],
+        pricesToPay[i],
+        validUntil,
+        redeemers[i],
+        giftReceiver[i]
+      );
+      // Save the voucher to the array
+      contentPurchaseVouchers.push(contentPurchaseVoucher);
+    }
+    /// Try to purchase the content
     await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [true], [[1]], [ethers.constants.AddressZero])
-    ).to.revertedWith("Content does not exist!");
+      contractPlatformTreasury.connect(contentBuyer1).buyContentWithDiscount(contentPurchaseVouchers)
+    ).to.revertedWith("Content not exist!");
   });
 
   it("Should fail to buy content if buyer is banned", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
-    await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// Set BAN
-    await contractRoleManager.setBan(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [ethers.utils.parseEther("1"), ethers.utils.parseEther("1")];
-
-    /// Create voucher from redeem.js and use it for creating content
+    await contractRoleManager.setKYC(contentBuyer1.address, true);
+    // Create content
+    const contentParts = [0, 1, 2, 3, 4, 5];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
-
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
-    );
-
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Ban the buyer
+    await contractRoleManager.setBan(contentBuyer1.address, true);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[2, 3, 5]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const contentPurchaseVouchers = [];
+    for (let i = 0; i < tokenIds.length; i++) {
+      const contentPurchaseVoucher = await new DiscountedPurchase({
+        contract: contractVoucherVerifier,
+        signer: backend,
+      }).createVoucher(
+        tokenIds[i],
+        fullContentPurchase[i],
+        purchasedParts[i],
+        pricesToPay[i],
+        validUntil,
+        redeemers[i],
+        giftReceiver[i]
+      );
+      // Save the voucher to the array
+      contentPurchaseVouchers.push(contentPurchaseVoucher);
+    }
+    /// Try to purchase the content with banned buyer
     await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [true], [[1]], [ethers.constants.AddressZero])
+      contractPlatformTreasury.connect(contentBuyer1).buyContentWithDiscount(contentPurchaseVouchers)
     ).to.revertedWith("You are banned");
   });
 
-  it("Should fail to buy content if instructer is banned", async function () {
+  it("Should fail to buy content if instructer is banned and isSelleble set to false", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
-    await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [ethers.utils.parseEther("1"), ethers.utils.parseEther("1")];
-
-    /// Create voucher from redeem.js and use it for creating content
+    await contractRoleManager.setKYC(contentBuyer1.address, true);
+    // Create content
+    const contentParts = [0, 1, 2, 3, 4, 5];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
-
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
-    );
-
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    /// Set BAN
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Ban the instructor
     await contractRoleManager.setBan(contentCreator.address, true);
 
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // set sellebla to false
+    await contractUDAOContent.connect(backend).setSellable(tokenId, false);
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[2, 3, 5]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const contentPurchaseVouchers = [];
+    for (let i = 0; i < tokenIds.length; i++) {
+      const contentPurchaseVoucher = await new DiscountedPurchase({
+        contract: contractVoucherVerifier,
+        signer: backend,
+      }).createVoucher(
+        tokenIds[i],
+        fullContentPurchase[i],
+        purchasedParts[i],
+        pricesToPay[i],
+        validUntil,
+        redeemers[i],
+        giftReceiver[i]
+      );
+      // Save the voucher to the array
+      contentPurchaseVouchers.push(contentPurchaseVoucher);
+    }
+    /// Try to purchase the content with banned instructor
     await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [true], [[1]], [ethers.constants.AddressZero])
-    ).to.revertedWith("Instructor is banned");
+      contractPlatformTreasury.connect(contentBuyer1).buyContentWithDiscount(contentPurchaseVouchers)
+    ).to.revertedWith("Not sellable");
+  });
+  it("Should allow to buy content if instructer is banned and isSelleble set to true", async function () {
+    await reDeploy();
+    /// Set KYC
+    await contractRoleManager.setKYC(contentCreator.address, true);
+    await contractRoleManager.setKYC(contentBuyer.address, true);
+    // Create content
+    const contentParts = [0, 1, 2, 3, 4, 5];
+    // Create content voucher
+    const createContentVoucherSample = await createContentVoucher(
+      contractUDAOContent,
+      backend,
+      contentCreator,
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
+    );
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Ban the instructor
+    await contractRoleManager.setBan(contentCreator.address, true);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[2, 3, 5]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers,
+      giftReceiver
+    );
+    const balanceBefore = balances[0];
+    const balanceAfter = balances[1];
+
+    /// Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer1.address, tokenId);
+    expect(result[0]).to.equal(purchasedParts[0][0]);
+    /// Get tokenId 0 price with calculatePriceToPay function
+    const priceToPay = pricesToPay[0];
+    /// Check if the buyer paid the correct amount
+    expect(balanceBefore.sub(balanceAfter)).to.equal(priceToPay);
   });
 
   it("Should fail to buy a content part if full content is already purchased", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-    ];
-
-    ///Create Voucher from redeem.js and use it for creating content
+    // Create content
+    const contentParts = [0, 1];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
 
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // You need to use all parts of the content to buy it. Get all parts of the content
+
+    const parts = await contractUDAOContent.getContentParts(tokenId);
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [parts];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [true];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers,
+      giftReceiver
     );
+    const balanceBefore = balances[0];
+    const balanceAfter = balances[1];
 
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    await contractPlatformTreasury.connect(contentBuyer).buyContent([0], [true], [[1]], [ethers.constants.AddressZero]);
-
+    /// Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer1.address, tokenId);
+    expect(result[0]).to.equal(purchasedParts[0][0]);
+    /// Get tokenId 0 price with calculatePriceToPay function
+    const priceToPay = pricesToPay[0];
+    /// Check if the buyer paid the correct amount
+    expect(balanceBefore.sub(balanceAfter)).to.equal(priceToPay);
+    /// Try to buy the same content part again
     await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [false], [[3]], [contentBuyer.address])
-    ).to.revertedWith("Full content is already bought");
-  });
-
-  it("Should fail to buy a full content if fullContentPurchase is false", async function () {
-    await reDeploy();
-
-    /// Set KYC
-    await contractRoleManager.setKYC(contentCreator.address, true);
-    await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-    ];
-
-    ///Create Voucher from redeem.js and use it for creating content
-    const createContentVoucherSample = await createContentVoucher(
-      contractUDAOContent,
-      backend,
-      contentCreator,
-      partPricesArray
-    );
-
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    await expect(contractSupervision.connect(validator1).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator1.address);
-    await expect(contractSupervision.connect(validator2).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator2.address);
-    await expect(contractSupervision.connect(validator3).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator3.address);
-    await expect(contractSupervision.connect(validator4).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator4.address);
-    await expect(contractSupervision.connect(validator5).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator5.address);
-
-    await expect(contractSupervision.connect(validator1).sendValidation(1, true))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator1.address, true);
-    await expect(contractSupervision.connect(validator2).sendValidation(1, true))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator2.address, true);
-    await expect(contractSupervision.connect(validator3).sendValidation(1, true))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator3.address, true);
-    await expect(contractSupervision.connect(validator4).sendValidation(1, false))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator4.address, false);
-    await expect(contractSupervision.connect(validator5).sendValidation(1, false))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator5.address, false);
-    await expect(contractSupervision.connect(contentCreator).finalizeValidation(1))
-      .to.emit(contractSupervision, "ValidationEnded")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), true);
-
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [false], [[0]], [ethers.constants.AddressZero])
-    ).to.revertedWith("Purchased parts says 0, but fullContentPurchase is false!");
+      makeContentPurchase(
+        contractPlatformTreasury,
+        contractVoucherVerifier,
+        contentBuyer1,
+        contractRoleManager,
+        contractUDAO,
+        tokenIds,
+        purchasedParts,
+        pricesToPay,
+        fullContentPurchase,
+        validUntil,
+        redeemers,
+        giftReceiver
+      )
+    ).to.revertedWith("Content is already fully purchased!");
   });
 
   it("Should fail to buy a content part if the part does not exist", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-    ];
-
-    ///Create Voucher from redeem.js and use it for creating content
+    // Give approval to the platformtreasury
+    await contractUDAO
+      .connect(contentBuyer)
+      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
+    // Send UDAO to the buyer's wallet
+    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
+    // Create content
+    const contentParts = [0, 1];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
 
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    await expect(contractSupervision.connect(validator1).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator1.address);
-    await expect(contractSupervision.connect(validator2).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator2.address);
-    await expect(contractSupervision.connect(validator3).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator3.address);
-    await expect(contractSupervision.connect(validator4).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator4.address);
-    await expect(contractSupervision.connect(validator5).assignValidation(1))
-      .to.emit(contractSupervision, "ValidationAssigned")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator5.address);
-
-    await expect(contractSupervision.connect(validator1).sendValidation(1, true))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator1.address, true);
-    await expect(contractSupervision.connect(validator2).sendValidation(1, true))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator2.address, true);
-    await expect(contractSupervision.connect(validator3).sendValidation(1, true))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator3.address, true);
-    await expect(contractSupervision.connect(validator4).sendValidation(1, false))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator4.address, false);
-    await expect(contractSupervision.connect(validator5).sendValidation(1, false))
-      .to.emit(contractSupervision, "ValidationResultSent")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), validator5.address, false);
-    await expect(contractSupervision.connect(contentCreator).finalizeValidation(1))
-      .to.emit(contractSupervision, "ValidationEnded")
-      .withArgs(ethers.BigNumber.from(0), ethers.BigNumber.from(1), true);
-
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[8]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    // Try to buy a content part that does not exists
     await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [false], [[20]], [ethers.constants.AddressZero])
+      makeContentPurchase(
+        contractPlatformTreasury,
+        contractVoucherVerifier,
+        contentBuyer1,
+        contractRoleManager,
+        contractUDAO,
+        tokenIds,
+        purchasedParts,
+        pricesToPay,
+        fullContentPurchase,
+        validUntil,
+        redeemers,
+        giftReceiver
+      )
     ).to.revertedWith("Part does not exist!");
   });
 
   it("Should buy the full content for someone else", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-    await contractRoleManager.setKYC(validator1.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [ethers.utils.parseEther("1"), ethers.utils.parseEther("1")];
-
-    ///Create Voucher from redeem.js and use it for creating content
+    await contractRoleManager.setKYC(contentBuyer3.address, true);
+    // Give approval to the platformtreasury
+    await contractUDAO
+      .connect(contentBuyer)
+      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
+    // Send UDAO to the buyer's wallet
+    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
+    // Create content
+    const contentParts = [0, 1];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
 
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    const parts = await contractUDAOContent.getContentParts(tokenId);
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [parts];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [contentBuyer3.address];
+    const fullContentPurchase = [true];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers,
+      giftReceiver
     );
+    const balanceBefore = balances[0];
+    const balanceAfter = balances[1];
+    // Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer3).getOwnedParts(contentBuyer3.address, tokenId);
+    expect(result[0]).to.equal(purchasedParts[0][0]);
+    expect(result[1]).to.equal(purchasedParts[0][1]);
+    expect(result[2]).to.equal(purchasedParts[0][2]);
 
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    await contractPlatformTreasury.connect(contentBuyer).buyContent([0], [true], [[1]], [validator1.address]);
-    const result = await contractPlatformTreasury.connect(contentBuyer).getOwnedContent(validator1.address);
-
-    const numArray = result.map((x) => x.map((y) => y.toNumber()));
-    expect(numArray).to.eql([[0, 0]]);
+    /// Check if the buyer paid the correct amount
+    //expect(balanceBefore.sub(balanceAfter)).to.equal(priceToPay);
+    expect(balanceBefore.sub(balanceAfter)).to.equal(pricesToPay[0]);
   });
 
   it("Should buy the part of the content for someone else", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-    await contractRoleManager.setKYC(validator1.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [ethers.utils.parseEther("1"), ethers.utils.parseEther("1"), ethers.utils.parseEther("1")];
-
-    ///Create Voucher from redeem.js and use it for creating content
+    await contractRoleManager.setKYC(contentBuyer3.address, true);
+    // Create content
+    const contentParts = [0, 1, 2, 3, 4, 5];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
 
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    const parts = await contractUDAOContent.getContentParts(tokenId);
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [[2, 3, 4]];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [contentBuyer3.address];
+    const fullContentPurchase = [false];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers,
+      giftReceiver
     );
+    const balanceBefore = balances[0];
+    const balanceAfter = balances[1];
+    /// Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer3.address, tokenId);
+    expect(result[0]).to.equal(purchasedParts[0][0]);
+    expect(result[1]).to.equal(purchasedParts[0][1]);
+    expect(result[2]).to.equal(purchasedParts[0][2]);
 
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    await contractPlatformTreasury.connect(contentBuyer).buyContent([0], [false], [[1, 2]], [validator1.address]);
-    const result = await contractPlatformTreasury.connect(contentBuyer).getOwnedContent(validator1.address);
-
-    const numArray = result.map((x) => x.map((y) => y.toNumber()));
-    expect(numArray).to.eql([
-      [0, 1],
-      [0, 2],
-    ]);
+    /// Check if the buyer paid the correct amount
+    expect(balanceBefore.sub(balanceAfter)).to.equal(pricesToPay[0]);
   });
 
   it("Should fail to buy the full content for someone else if other account is banned", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [ethers.utils.parseEther("1"), ethers.utils.parseEther("1")];
-
-    ///Create Voucher from redeem.js and use it for creating content
+    await contractRoleManager.setKYC(contentBuyer3.address, true);
+    /// Ban the contentBuyer 3
+    await contractRoleManager.setBan(contentBuyer3.address, true);
+    // Give approval to the platformtreasury
+    await contractUDAO
+      .connect(contentBuyer)
+      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
+    // Send UDAO to the buyer's wallet
+    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
+    // Create content
+    const contentParts = [0, 1];
+    // Create content voucher
     const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
 
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
-    );
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-    // Set Ban the gift receiver
-    await contractRoleManager.setBan(validator1.address, true);
-    // Buy Content
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId = receipt.events[0].args[2].toNumber();
+    const parts = await contractUDAOContent.getContentParts(tokenId);
+    // Make a content purchase
+    const tokenIds = [1];
+    const purchasedParts = [parts];
+    const redeemers = [contentBuyer1.address];
+    const giftReceiver = [contentBuyer3.address];
+    const fullContentPurchase = [true];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    // Try to buy the content
     await expect(
-      contractPlatformTreasury.connect(contentBuyer).buyContent([0], [true], [[1]], [validator1.address])
+      makeContentPurchase(
+        contractPlatformTreasury,
+        contractVoucherVerifier,
+        contentBuyer1,
+        contractRoleManager,
+        contractUDAO,
+        tokenIds,
+        purchasedParts,
+        pricesToPay,
+        fullContentPurchase,
+        validUntil,
+        redeemers,
+        giftReceiver
+      )
     ).to.revertedWith("Gift receiver is banned");
-  });
-
-  it("Should a user able to buy the full content with discount", async function () {
-    await reDeploy();
-
-    /// Set KYC
-    await contractRoleManager.setKYC(contentCreator.address, true);
-    await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray = [ethers.utils.parseEther("1"), ethers.utils.parseEther("1")];
-
-    ///Create Voucher from redeem.js and use it for creating content
-    const createContentVoucherSample = await createContentVoucher(
-      contractUDAOContent,
-      backend,
-      contentCreator,
-      partPricesArray
-    );
-
-    /// Create content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    /// Start validation and finalize it
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
-    );
-
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    const discountedPurchase = new DiscountedPurchase({
-      contract: contractPlatformTreasury,
-      signer: backend,
-    });
-    const coaching_voucher = await discountedPurchase.createVoucher(
-      0,
-      true,
-      [0],
-      ethers.utils.parseEther("0.5"),
-      Date.now() + 999999999,
-      contentBuyer.address,
-      ethers.constants.AddressZero
-    );
-
-    await contractPlatformTreasury.connect(contentBuyer).buyDiscountedContent(coaching_voucher);
-    const result = await contractPlatformTreasury.connect(contentBuyer).getOwnedContent(contentBuyer.address);
-
-    const numArray = result.map((x) => x.map((y) => y.toNumber()));
-    expect(numArray).to.eql([[0, 0]]);
   });
 
   it("Should a user able to buy multiple content", async function () {
     await reDeploy();
-
     /// Set KYC
     await contractRoleManager.setKYC(contentCreator.address, true);
     await contractRoleManager.setKYC(contentBuyer.address, true);
-
-    /// part prices must be determined before creating content
-    const partPricesArray1stContent = [
-      ethers.utils.parseEther("2"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("1"),
-    ];
-    const partPricesArray2ndContent = [ethers.utils.parseEther("3"), ethers.utils.parseEther("2")];
-    const partPricesArray3rdContent = [
-      ethers.utils.parseEther("5"),
-      ethers.utils.parseEther("1"),
-      ethers.utils.parseEther("3"),
-    ];
-
-    /// Create Voucher from redeem.js and use it for creating content
-    const createContentVoucherSample1stContent = await createContentVoucher(
+    await contractRoleManager.setKYC(contentBuyer1.address, true);
+    // Create content
+    const contentParts = [0, 1, 2, 3, 4];
+    // Create content voucher
+    const createContentVoucherSample = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray1stContent
+      contentParts,
+      (redeemType = 1),
+      (validationScore = 1)
     );
-    const createContentVoucherSample2ndContent = await createContentVoucher(
+
+    // Create content with voucher
+    const tx = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample);
+    // Get NewContentCreated event and get tokenId
+    const receipt = await tx.wait();
+    const tokenId1 = receipt.events[0].args[2].toNumber();
+    // Create content
+    const contentParts2 = [0, 1, 2, 3, 4, 5, 6];
+    // Create content voucher
+    const createContentVoucherSample2 = await createContentVoucher(
       contractUDAOContent,
       backend,
       contentCreator,
-      partPricesArray2ndContent
-    );
-    const createContentVoucherSample3rdContent = await createContentVoucher(
-      contractUDAOContent,
-      backend,
-      contentCreator,
-      partPricesArray3rdContent
+      contentParts2,
+      (redeemType = 1),
+      (validationScore = 1)
     );
 
-    /// Create content
-    //1st content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample1stContent))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 0);
-    //2nd content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample2ndContent))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 1);
-    //3rd content
-    await expect(contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample3rdContent))
-      .to.emit(contractUDAOContent, "Transfer") // transfer from null address to minter
-      .withArgs("0x0000000000000000000000000000000000000000", contentCreator.address, 2);
-
-    /// Start validation and finalize it for 1st content
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator
+    // Create content with voucher
+    const tx2 = await contractUDAOContent.connect(contentCreator).createContent(createContentVoucherSample2);
+    // Get NewContentCreated event and get tokenId
+    const receipt2 = await tx2.wait();
+    const tokenId2 = receipt2.events[0].args[2].toNumber();
+    // You need to use all parts of the content to buy it. Get all parts of the content
+    const parts1 = await contractUDAOContent.getContentParts(tokenId1);
+    const parts2 = await contractUDAOContent.getContentParts(tokenId2);
+    // Make a content purchase for token 1
+    const tokenIds = [1];
+    const purchasedParts1 = [parts1];
+    const redeemers1 = [contentBuyer1.address];
+    const giftReceiver = [ethers.constants.AddressZero];
+    const fullContentPurchase = [true];
+    const pricesToPay = [ethers.utils.parseEther("1")];
+    const validUntil = Date.now() + 999999999;
+    const balances = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds,
+      purchasedParts1,
+      pricesToPay,
+      fullContentPurchase,
+      validUntil,
+      redeemers1,
+      giftReceiver
     );
-    /// Start validation and finalize it for 2nd content
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator,
-      (tokenId = 1),
-      (validationId = 2)
+    const balanceBefore1 = balances[0];
+    const balanceAfter1 = balances[1];
+    // Check if the buyer has the content part
+    const result = await contractPlatformTreasury.connect(contentBuyer1).getOwnedParts(contentBuyer1.address, tokenId1);
+    // Check if purchasedParts1[0] array same as result array
+    for (let i = 0; i < purchasedParts1[0].length; i++) {
+      expect(result[i]).to.equal(purchasedParts1[0][i]);
+    }
+    // Check if the buyer paid the correct amount
+    expect(balanceBefore1.sub(balanceAfter1)).to.equal(pricesToPay[0]);
+    // Make a content purchase for token 2
+    const tokenIds2 = [2];
+    const purchasedParts2 = [parts2];
+    const redeemers2 = [contentBuyer1.address];
+    const giftReceiver2 = [ethers.constants.AddressZero];
+    const fullContentPurchase2 = [true];
+    const pricesToPay2 = [ethers.utils.parseEther("1")];
+    const validUntil2 = Date.now() + 999999999;
+    const balances2 = await makeContentPurchase(
+      contractPlatformTreasury,
+      contractVoucherVerifier,
+      contentBuyer1,
+      contractRoleManager,
+      contractUDAO,
+      tokenIds2,
+      purchasedParts2,
+      pricesToPay2,
+      fullContentPurchase2,
+      validUntil2,
+      redeemers2,
+      giftReceiver2
     );
-    /// Start validation and finalize it for 2nd content
-    await runValidation(
-      contractSupervision,
-      backend,
-      validator1,
-      validator2,
-      validator3,
-      validator4,
-      validator5,
-      contentCreator,
-      (tokenId = 2),
-      (validationId = 3)
-    );
-
-    /// Send UDAO to the buyer's wallet
-    await contractUDAO.transfer(contentBuyer.address, ethers.utils.parseEther("100.0"));
-    /// Content buyer needs to give approval to the platformtreasury
-    await contractUDAO
-      .connect(contentBuyer)
-      .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
-
-    await contractPlatformTreasury
-      .connect(contentBuyer)
-      .buyContent(
-        [0, 1, 2],
-        [true, true, false],
-        [[1], [1], [1, 2]],
-        [ethers.constants.AddressZero, validator1.address, ethers.constants.AddressZero]
-      );
-    const resultForBuyer = await contractPlatformTreasury.connect(contentBuyer).getOwnedContent(contentBuyer.address);
-
-    const numArrayForBuyer = resultForBuyer.map((x) => x.map((y) => y.toNumber()));
-    expect(numArrayForBuyer).to.eql([
-      [0, 0], // 1st content, part 0 (Full Content)
-      //[1, 0], // 2nd content, part 0 (Full Content) but it is a gift
-      [2, 1], // 3rd content, part 1 (Partial Content)
-      [2, 2], // 3rd content, part 2 (Partial Content)
-    ]);
-
-    const resultForGiftReceiver = await contractPlatformTreasury
-      .connect(contentBuyer)
-      .getOwnedContent(validator1.address);
-
-    const numArrayForGiftReceiver = resultForGiftReceiver.map((x) => x.map((y) => y.toNumber()));
-    expect(numArrayForGiftReceiver).to.eql([[1, 0]]);
+    const balanceBefore2 = balances2[0];
+    const balanceAfter2 = balances2[1];
+    // Check if the buyer has the content part
+    const result2 = await contractPlatformTreasury
+      .connect(contentBuyer1)
+      .getOwnedParts(contentBuyer1.address, tokenId2);
+    // Check if purchasedParts2[0] array same as result2 array
+    for (let i = 0; i < purchasedParts2[0].length; i++) {
+      expect(result2[i]).to.equal(purchasedParts2[0][i]);
+    }
+    // Check if the buyer paid the correct amount
+    expect(balanceBefore2.sub(balanceAfter2)).to.equal(pricesToPay2[0]);
   });
 });

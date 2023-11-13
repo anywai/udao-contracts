@@ -9,6 +9,37 @@ import "./interfaces/IRoleManager.sol";
 abstract contract RoleLegacy is RoleNames {
     /// @notice Role manager contract address
     IRoleManager roleManager;
+
+    /// @notice Checks if a wallet address has a specific role
+    /// @param _role The role to check
+    /// @param _account The address to check
+    function hasRole(
+        bytes32 _role,
+        address _account
+    ) internal view returns (bool) {
+        return (roleManager.hasRole(_role, _account));
+    }
+
+    /// @notice Checks if a wallet address is banned from a specific function
+    /// @param _userAddress The address to check
+    /// @param _functionID The function to check
+    function isNotBanned(
+        address _userAddress,
+        uint _functionID
+    ) internal view returns (bool) {
+        return !roleManager.isBanned(_userAddress, _functionID);
+    }
+
+    /// @notice Checks if a wallet address is KYCed for a specific function
+    /// @param _userAddress The address to check
+    /// @param _functionID The function to check
+    function isKYCed(
+        address _userAddress,
+        uint _functionID
+    ) internal view returns (bool) {
+        return roleManager.isKYCed(_userAddress, _functionID);
+    }
+
     /// @notice Address of foundation wallet is used for sending funds to foundation
     address foundationWallet;
 
@@ -28,26 +59,5 @@ abstract contract RoleLegacy is RoleNames {
         );
         foundationWallet = _newAddress;
         emit FoundationWalletUpdated(_newAddress);
-    }
-
-    function hasRole(
-        bytes32 _role,
-        address _account
-    ) internal view returns (bool) {
-        return (roleManager.hasRole(_role, _account));
-    }
-
-    function isNotBanned(
-        address _userAddress,
-        uint _functionID
-    ) internal view returns (bool) {
-        return !roleManager.isBanned(_userAddress, _functionID);
-    }
-
-    function isKYCed(
-        address _userAddress,
-        uint _functionID
-    ) internal view returns (bool) {
-        return roleManager.isKYCed(_userAddress, _functionID);
     }
 }
