@@ -99,7 +99,7 @@ contract Vesting is AccessControl {
     }
 
     /// @notice Allows beneficiary to withdraw tokens
-    /// @param vestingIndex The index of the lockbox to withdraw from
+    /// @param vestingIndex The index of the vestingLocks to withdraw from
     function withdraw(uint vestingIndex) public returns (bool success) {
         VestingLock storage currentVesting = vestingLocks[vestingIndex];
         require(currentVesting.beneficiary == msg.sender);
