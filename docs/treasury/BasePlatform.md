@@ -1,562 +1,142 @@
 # Solidity API
 
-## BasePlatform
+## Vesting
 
-### BACKEND_ROLE
-
-```solidity
-bytes32 BACKEND_ROLE
-```
-
-_Role definitions are here to reduce the size of the contract._
-
-### FOUNDATION_ROLE
+### token
 
 ```solidity
-bytes32 FOUNDATION_ROLE
+contract IERC20 token
 ```
 
-### GOVERNANCE_ROLE
+_The token being held in this contract._
+
+### VestingLock
+Represents a VestingLock that holds tokens for a beneficiary until a release time.
 
 ```solidity
-bytes32 GOVERNANCE_ROLE
+struct VestingLock {
+  address beneficiary;
+  uint256 balance;
+  uint256 releaseTime;
+}
 ```
+#### Parameters
 
-### CONTRACT_MANAGER
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| beneficiary | address | The address of the account that will receive the tokens when they are released. |
+| balance | uint | The amount of tokens still locked. |
+| releaseTime | uint | The time when the tokens are released. |
+
+### vestingLocks
 
 ```solidity
-bytes32 CONTRACT_MANAGER
+struct Vesting.VestingLock[] vestingLocks
 ```
 
-### roleManager
+_Array of VestingLocks_
+
+### VestingDeposit
 
 ```solidity
-contract IRoleManager roleManager
+event VestingDeposit(address sender, address beneficiary, uint256 vestingIndex, uint256 amount, uint256 releaseTime)
 ```
 
-Role manager contract address
+_This event is triggered when tokens are deposited into the contract and lock created._
 
-### udao
+### VestingWithdrawal
 
 ```solidity
-contract IERC20 udao
+event VestingWithdrawal(address receiver, uint256 vestingIndex, uint256 amount)
 ```
 
-UDAO (ERC20) Token is main token of the platform and used for payments
+_This event is triggered when tokens are withdrawn from the contract._
 
-### udaoc
+### DEPOSITOR_ROLE
 
 ```solidity
-contract IUDAOC udaoc
+bytes32 DEPOSITOR_ROLE
 ```
 
-UDAOC (ERC721) Token is defines contents and used for content ownership
-
-### voucherVerifier
-
-```solidity
-contract IVoucherVerifier voucherVerifier
-```
-
-VoucherVerifier contract is defines the vouchers of PlatformTreasury and used to verify vouchers
-
-### governanceTreasury
-
-```solidity
-contract IGovernanceTreasury governanceTreasury
-```
-
-GovernanceTreasury contract is platforms governance related funds treasury contract
-
-### foundationWallet
-
-```solidity
-address foundationWallet
-```
-
-Address of foundation wallet is used for sending funds to foundation
-
-### refundWindow
-
-```solidity
-uint256 refundWindow
-```
-
-during refund windows all payments locked on contract and users can request refund
-
-_it initiated as 20 days and locked balance/pool array's size (61) defines the maximum setable refund window._
-
-### instBalance
-
-```solidity
-mapping(address => uint256) instBalance
-```
-
-instructor address => instructor's balance
-
-### instLockedBalance
-
-```solidity
-mapping(address => uint256[61]) instLockedBalance
-```
-
-instructor address => instructor's locked balances
-
-### contentCutPool
-
-```solidity
-uint256 contentCutPool
-```
-
-content cut pool for content sales
-
-### contentCutLockedPool
-
-```solidity
-uint256[61] contentCutLockedPool
-```
-
-content cut locked pool for content sales (locked revenues during refund window)
-
-### coachingCutPool
-
-```solidity
-uint256 coachingCutPool
-```
-
-coaching cut pool for coaching sales
-
-### coachingCutLockedPool
-
-```solidity
-uint256[61] coachingCutLockedPool
-```
-
-coaching cut locked pool for coaching sales (locked revenues during refund window)
-
-### foundationBalance
-
-```solidity
-uint256 foundationBalance
-```
-
-foundation balance
-
-### governanceBalance
-
-```solidity
-uint256 governanceBalance
-```
-
-governance pool balance
-
-### jurorBalance
-
-```solidity
-uint256 jurorBalance
-```
-
-juror pool balance
-
-### validatorsBalance
-
-```solidity
-uint256 validatorsBalance
-```
-
-validator pool balance
-
-### instLockTime
-
-```solidity
-mapping(address => uint256) instLockTime
-```
-
-instructor address => the date of the oldest locked payment of instructor.
-
-### platformLockTime
-
-```solidity
-uint256 platformLockTime
-```
-
-the date of the oldest locked payment in content/coaching CutLockedPool
-
-_platformLockTime initialized with deployment time_
-
-### instRefundedBalance
-
-```solidity
-mapping(address => uint256) instRefundedBalance
-```
-
-instructor address => instructor's refunded balance to users
-
-### contentCutRefundedBalance
-
-```solidity
-uint256 contentCutRefundedBalance
-```
-
-content cut pool's refunded cuts to users
-
-### coachingCutRefundedBalance
-
-```solidity
-uint256 coachingCutRefundedBalance
-```
-
-coaching cut pool's refunded cuts to users
-
-### prevInstRefundWindow
-
-```solidity
-mapping(address => uint256) prevInstRefundWindow
-```
-
-instructor address => instructor's previous refund window for last sale
-
-### contentFoundCut
-
-```solidity
-uint256 contentFoundCut
-```
-
-The allocated cut for foundation from content sales
-
-_initiated as (4000/100000 = 4%)_
-
-### contentGoverCut
-
-```solidity
-uint256 contentGoverCut
-```
-
-The allocated cut for governance pool from content sales
-
-_initiated as 0% and planned to be (700/100000 = 0.7%) after governance release_
-
-### contentJurorCut
-
-```solidity
-uint256 contentJurorCut
-```
-
-The allocated cut for juror pool from content sales
-
-_initiated as 0% and planned to be (100/100000 = 0.1%) after governance release_
-
-### contentValidCut
-
-```solidity
-uint256 contentValidCut
-```
-
-The allocated cut for validator pool from content sales
-
-_initiated as 0% and planned to be (200/100000 = 0.2%) after governance release_
-
-### coachFoundCut
-
-```solidity
-uint256 coachFoundCut
-```
-
-The allocated cut for foundation from coaching sales
-
-_initiated as (4000/100000 = 4%)_
-
-### coachGoverCut
-
-```solidity
-uint256 coachGoverCut
-```
-
-The allocated cut for governance pool from coaching sales
-
-_initiated as 0% and planned to be (700/100000 = 0.7%) after governance release_
-
-### coachJurorCut
-
-```solidity
-uint256 coachJurorCut
-```
-
-The allocated cut for juror pool from coaching sales
-
-_initiated as 0% and planned to be (100/100000 = 0.1%) after governance release_
-
-### coachValidCut
-
-```solidity
-uint256 coachValidCut
-```
-
-The allocated cut for validator pool from coaching sales
-
-_initiated as 0% and there is no use case_
-
-### contentTotalCut
-
-```solidity
-uint256 contentTotalCut
-```
-
-allocated total cut for foundation, governance, juror and validator from content sales
-
-### coachTotalCut
-
-```solidity
-uint256 coachTotalCut
-```
-
-allocated total cut for foundation, governance, juror and validator from coaching sales
-
-### isGovernanceTreasuryOnline
-
-```solidity
-bool isGovernanceTreasuryOnline
-```
-
-is governance part of platform released
+_This role is used to grant access to deposit tokens and create locks._
 
 ### constructor
 
 ```solidity
-constructor(address roleManagerAddress, address udaoAddress, address udaocAddress, address governanceTreasuryAddress, address voucherVerifierAddress) internal
+constructor(address tokenContract) public
 ```
 
-constructor of BasePlatform
+### grantDepositerRole
+
+```solidity
+function grantDepositerRole(address _newAddress) external
+```
+
+Allows admin to grant depositer role to a new address
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| roleManagerAddress | address | is address of RoleManager contract |
-| udaoAddress | address | is address of UDAO token contract |
-| udaocAddress | address | is address of UDAOC token contract |
-| governanceTreasuryAddress | address | is address of GovernanceTreasury contract |
-| voucherVerifierAddress | address | is address of VoucherVerifier contract |
+| _newAddress | address | The address to grant the role to |
 
-### FoundationWalletUpdated
+### revokeDepositerRole
 
 ```solidity
-event FoundationWalletUpdated(address newAddress)
+function revokeDepositerRole(address _oldAddress) external
 ```
 
-This event is triggered if the foundation wallet address is updated.
-
-### AddressesUpdated
-
-```solidity
-event AddressesUpdated(address UDAOAddress, address UDAOCAddress, address RoleManagerAddress, address GovernanceTreasuryAddress, address VoucherVerifierAddress)
-```
-
-This event is triggered if the contract manager updates the addresses.
-
-### PlatformCutsUpdated
-
-```solidity
-event PlatformCutsUpdated(uint256 _contentFoundCut, uint256 _contentGoverCut, uint256 _contentJurorCut, uint256 _contentValidCut, uint256 _contentTotalCut, uint256 _coachFoundCut, uint256 _coachGoverCut, uint256 _coachJurorCut, uint256 _coachValidCut, uint256 _coachTotalCut)
-```
-
-This event is triggered if a cut is updated.
+Allows admin to revoke depositer role from an address
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| _contentFoundCut | uint256 | is the new cut for foundation |
-| _contentGoverCut | uint256 | is the new cut for governance |
-| _contentJurorCut | uint256 | is the new cut for juror pool |
-| _contentValidCut | uint256 | is the new cut for validator pool |
-| _contentTotalCut | uint256 | is the new total cut for foundation, governance, juror and validator |
-| _coachFoundCut | uint256 | is the new cut for foundation |
-| _coachGoverCut | uint256 | is the new cut for governance |
-| _coachJurorCut | uint256 | is the new cut for juror pool |
-| _coachValidCut | uint256 | is the new cut for validator pool |
-| _coachTotalCut | uint256 | is the new total cut for foundation, governance, juror and validator |
+| _oldAddress | address | The address to revoke the role from |
 
-### setFoundationAddress
+### deposit
 
 ```solidity
-function setFoundationAddress(address _newAddress) external
+function deposit(address beneficiary, uint256 amount, uint256 releaseTime) external returns (bool success)
 ```
 
-sets foundation wallet addresses
+Allows DEPOSITOR_ROLE to deposit tokens for a beneficiary
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| _newAddress | address | new address of the contract |
+| beneficiary | address | The address to lock tokens for |
+| amount | uint256 | The amount of tokens to lock |
+| releaseTime | uint256 | The time when the tokens can be withdrawn |
 
-### updateAddresses
+### depositInBatch
 
 ```solidity
-function updateAddresses(address udaoAddress, address udaocAddress, address roleManagerAddress, address governanceTreasuryAddress, address voucherVerifierAddress) external
+function depositInBatch(address[] beneficiaries, uint256[] amounts, uint256[] releaseTimes) external returns (bool success)
 ```
 
-Get the updated addresses from contract manager
+Allows DEPOSITOR_ROLE to deposit tokens for multiple beneficiaries
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| udaoAddress | address | The address of the UDAO token contract |
-| udaocAddress | address | The address of the UDAOC token contract |
-| roleManagerAddress | address | The address of the role manager contract |
-| governanceTreasuryAddress | address | The address of the governance treasury contract |
-| voucherVerifierAddress | address | The address of the voucher verifier contract |
+| beneficiaries | address[] | The addresses to lock tokens for |
+| amounts | uint256[] | The amounts of tokens to lock |
+| releaseTimes | uint256[] | The times when the tokens can be withdrawn |
 
-### hasRole
+### withdraw
 
 ```solidity
-function hasRole(bytes32 _role, address _account) internal view returns (bool)
+function withdraw(uint256 vestingIndex) public returns (bool success)
 ```
 
-Checks if the user has the given role
+Allows beneficiary to withdraw tokens
 
 #### Parameters
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| _role | bytes32 | is the role to be checked |
-| _account | address | is the address to be checked |
-
-### isNotBanned
-
-```solidity
-function isNotBanned(address _userAddress, uint256 _functionID) internal view returns (bool)
-```
-
-Checks if the user is banned
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _userAddress | address | is the address to be checked |
-| _functionID | uint256 | is the function id to be checked |
-
-### isKYCed
-
-```solidity
-function isKYCed(address _userAddress, uint256 _functionID) internal view returns (bool)
-```
-
-Checks if the user is KYCed
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _userAddress | address | is the address to be checked |
-| _functionID | uint256 | is the function id to be checked |
-
-### activateGovernanceTreasury
-
-```solidity
-function activateGovernanceTreasury(bool _boolean) external
-```
-
-Allows the backend to activate the governance treasury
-
-_Tokens flows to governance treasury after if this function is called with true_
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _boolean | bool | is the boolean value to be set |
-
-### _distributeContentCutShares
-
-```solidity
-function _distributeContentCutShares(uint256 _revenue) internal
-```
-
-distribute the shares of foundation and governance/juror/validator pools from a platform's content sale revenue
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _revenue | uint256 | is the content sale revenue to be shared |
-
-### _distributeCoachingCutShares
-
-```solidity
-function _distributeCoachingCutShares(uint256 _revenue) internal
-```
-
-distribute the shares of foundation and governance/juror/validator pools from a platform's coaching sale revenue
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _revenue | uint256 | is the coaching sale revenue to be shared |
-
-### calculateContentSaleTotalCut
-
-```solidity
-function calculateContentSaleTotalCut(uint256 _priceOf) public view returns (uint256)
-```
-
-calculates the total cut to be applied by the platform in a content purchase.
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _priceOf | uint256 | is the price of the content |
-
-### calculateCoachingSaleTotalCut
-
-```solidity
-function calculateCoachingSaleTotalCut(uint256 _priceOf) public view returns (uint256)
-```
-
-calculates the total cut to be applied by the platform in a coaching purchase.
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _priceOf | uint256 | is the price of the coaching |
-
-### setCoachCuts
-
-```solidity
-function setCoachCuts(uint256 _coachFoundCut, uint256 _coachGoverCut, uint256 _coachJurorCut, uint256 _coachValidCut) external
-```
-
-sets the cut for foundation/governance/juror/validator for a coaching sale
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _coachFoundCut | uint256 | new cut for foundation |
-| _coachGoverCut | uint256 | new cut for governance |
-| _coachJurorCut | uint256 | new cut for juror pool |
-| _coachValidCut | uint256 | new cut for validator pool |
-
-### setContentCuts
-
-```solidity
-function setContentCuts(uint256 _contentFoundCut, uint256 _contentGoverCut, uint256 _contentJurorCut, uint256 _contentValidCut) external
-```
-
-sets the cut for foundation/governance/juror/validator for a content sale
-
-#### Parameters
-
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| _contentFoundCut | uint256 | new cut for foundation |
-| _contentGoverCut | uint256 | new cut for governance |
-| _contentJurorCut | uint256 | new cut for juror pool |
-| _contentValidCut | uint256 | new cut for validator pool |
+| vestingIndex | uint256 | The index of the lockbox to withdraw from |
 
