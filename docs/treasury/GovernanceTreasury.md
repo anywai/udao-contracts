@@ -1,7 +1,7 @@
 # Solidity API
 
 ## GovernanceTreasury
-This contract is only a placeholder to enable compilation and interaction for other contracts, and will be replaced at UDAO version 2.0 with a functional contract.
+
 ### udao
 
 ```solidity

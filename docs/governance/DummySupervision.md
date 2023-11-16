@@ -1,7 +1,7 @@
 # Solidity API
 
 ## DummySupervision
-Dummy version of the supervision contract. This contract will be replaced at UDAO version 2.0. This contract only serves as a placeholder so that other contracts can be compiled and work.
+
 ### emptyMapping
 
 ```solidity

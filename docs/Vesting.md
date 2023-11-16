@@ -130,5 +130,5 @@ Allows beneficiary to withdraw tokens
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| vestingIndex | uint256 | The index of the vestingLocks to withdraw from |
+| vestingIndex | uint256 | The index of the lockbox to withdraw from |
 
