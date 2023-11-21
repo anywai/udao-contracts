@@ -165,6 +165,10 @@ contract UDAOCertificate is
         address to,
         uint256 tokenId
     ) external {
+        require(
+            hasRole(BACKEND_ROLE, msg.sender),
+            "You don't have right to transfer token"
+        );
         /// @dev only backend can transfer token in emergency (in beforeTokenTransfer)
         _transfer(from, to, tokenId);
     }
