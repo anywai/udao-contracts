@@ -33,6 +33,11 @@ contract Vesting is AccessControl {
         uint vestingIndex,
         uint amount
     );
+    event VestingsWithdrawal(
+        address indexed receiver,
+        uint[] vestingIndeces,
+        uint amount
+    );
     /// @dev This role is used to grant access to deposit tokens and create locks.
     bytes32 public constant DEPOSITOR_ROLE = keccak256("DEPOSITOR_ROLE");
 
@@ -141,6 +146,31 @@ contract Vesting is AccessControl {
         currentVesting.balance = 0;
         emit VestingWithdrawal(msg.sender, vestingIndex, amount);
         require(token.transfer(msg.sender, amount));
+        return true;
+    }
+
+    /// @notice Allows beneficiary to withdraw tokens from multiple vesting locks
+    /// @param vestingIndices The indices of the vesting locks to withdraw from
+    function withdrawFromBatch(
+        uint[] calldata vestingIndices
+    ) external returns (bool success) {
+        uint256 totalRelease;
+        for (uint i = 0; i < vestingIndices.length; i++) {
+            VestingLock storage currentVesting = vestingLocks[
+                vestingIndices[i]
+            ];
+            require(
+                currentVesting.beneficiary == msg.sender,
+                "You are not the beneficiary of this vesting lock"
+            );
+            if (currentVesting.releaseTime <= block.timestamp) {
+                uint amount = currentVesting.balance;
+                currentVesting.balance = 0;
+                totalRelease += amount;
+                require(token.transfer(msg.sender, amount));
+            }
+        }
+        emit VestingsWithdrawal(msg.sender, vestingIndices, totalRelease);
         return true;
     }
 }
