@@ -73,11 +73,6 @@ contract PlatformTreasury is ContentManager {
     /// @notice withdraws foundation balance to foundation wallet
     function withdrawFoundation() external whenNotPaused {
         require(
-            block.timestamp > precautionWithdrawalTimestamp,
-            "Precaution withdrawal period is not over"
-        );
-
-        require(
             hasRole(FOUNDATION_ROLE, msg.sender),
             "Only foundation can withdraw"
         );
@@ -203,6 +198,18 @@ contract PlatformTreasury is ContentManager {
         require(
             hasRole(BACKEND_ROLE, msg.sender),
             "Only backend can set refund window"
+        );
+        require(
+            _newWindow >= 2,
+            "Refund window period should be at least 2 days"
+        );
+        require(
+            _newWindow <= 60,
+            "Refund window period should be at most 60 days"
+        );
+        require(
+            _newWindow != refundWindow,
+            "New window period is the same as the current one"
         );
         /// @dev this is the timestamp of the transaction in days
         uint256 transactionTime = (block.timestamp / 86400);
