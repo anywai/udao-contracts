@@ -2384,6 +2384,7 @@ describe("Platform Treasury Contract - Content", function () {
     await hre.network.provider.send("hardhat_mine", [`0x${numBlocksToMine2.toString(16)}`, "0x2"]);
 
     // change refund window to 7 days
+    const oldRefundWindow = refundWindowDaysNumber;
     const newRefundWindow = 7;
     await contractPlatformTreasury.connect(backend).changeRefundWindow(newRefundWindow);
 
@@ -2395,7 +2396,7 @@ describe("Platform Treasury Contract - Content", function () {
     expect(await contractPlatformTreasury.foundationBalance()).to.equal(contentFoundCut1);
 
     /// @dev Skip new refund window to complete refund window for seccond purchase
-    const numBlocksToMine3 = Math.ceil((newRefundWindow * 24 * 60 * 60) / 2);
+    const numBlocksToMine3 = Math.ceil((oldRefundWindow * 24 * 60 * 60) / 2);
     await hre.network.provider.send("hardhat_mine", [`0x${numBlocksToMine3.toString(16)}`, "0x2"]);
     const totalPrice2 = pricesToPay2[0];
     const contentFoundCut2 = totalPrice2.mul(_contentFoundCut).div(100000);
