@@ -159,7 +159,6 @@ describe("Voucher Verifier", function () {
     const validUntil = Date.now() + 999999999;
     const userIds = ["c8d53630-233a-4f95-90cb-4df253ae9283"];
 
-
     ///////////////////////MAKE CONTENT PURCHASE//////////////////////////
     contentBuyer = contentBuyer1;
 
@@ -206,9 +205,7 @@ describe("Voucher Verifier", function () {
       contentPurchaseVouchers.push(contentPurchaseVoucher);
     }
     /// Try to buy content and revert with "Signature invalid or unauthorized"
-    const transaction = contractPlatformTreasury
-      .connect(contentCreator)
-      .buyContent(contentPurchaseVouchers);
+    const transaction = contractPlatformTreasury.connect(contentCreator).buyContent(contentPurchaseVouchers);
     await expect(transaction).to.be.revertedWith("Signature invalid or unauthorized");
 
     const transaction2 = contractVoucherVerifier
@@ -255,7 +252,6 @@ describe("Voucher Verifier", function () {
     const validUntil = 1000000;
     const userIds = ["c8d53630-233a-4f95-90cb-4df253ae9283"];
 
-
     ///////////////////////MAKE CONTENT PURCHASE//////////////////////////
     contentBuyer = contentBuyer1;
 
@@ -291,9 +287,7 @@ describe("Voucher Verifier", function () {
     }
 
     /// Try to buy content and revert with "Signature invalid or unauthorized"
-    const transaction = contractPlatformTreasury
-      .connect(contentCreator)
-      .buyContent(contentPurchaseVouchers);
+    const transaction = contractPlatformTreasury.connect(contentCreator).buyContent(contentPurchaseVouchers);
     await expect(transaction).to.be.revertedWith("Voucher has expired.");
 
     const transaction2 = contractVoucherVerifier
@@ -354,7 +348,6 @@ describe("Voucher Verifier", function () {
       .approve(contractPlatformTreasury.address, ethers.utils.parseEther("999999999999.0"));
 
     /// Create content purchase vouchers
-    
 
     const contentPurchaseVouchers = [];
     for (let i = 0; i < tokenIds.length; i++) {
@@ -376,9 +369,7 @@ describe("Voucher Verifier", function () {
     }
 
     /// Buy content
-    const purchaseTx = await contractPlatformTreasury
-      .connect(contentBuyer)
-      .buyContent(contentPurchaseVouchers);
+    const purchaseTx = await contractPlatformTreasury.connect(contentBuyer).buyContent(contentPurchaseVouchers);
     const queueTxReceipt = await purchaseTx.wait();
     const queueTxEvent = queueTxReceipt.events.find((e) => e.event == "ContentBought");
     const contentSaleID = queueTxEvent.args[2];
